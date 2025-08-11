@@ -107,17 +107,31 @@ def triage_ticket(
     session: Session = Depends(get_session),
     x_user_id: int = Header(..., alias="X-User-ID")
 ):
+    # Validate triage officer role
     user = session.get(User, x_user_id)
     if not user or user.role != UserRole.triage_officer:
         raise HTTPException(status_code=403, detail="Only triage officers can triage tickets")
 
+    # Fetch ticket
     ticket = session.get(Ticket, ticket_id)
     if not ticket or ticket.status != TicketStatus.new:
         raise HTTPException(status_code=400, detail="Ticket not found or not in 'new' status")
 
+    # Validate assigned agent if provided
+    if update_data.assignee_id:
+        assignee = session.get(User, update_data.assignee_id)
+        if not assignee or assignee.role != UserRole.agent:
+            raise HTTPException(status_code=400, detail="Invalid assignee: must be an agent")
+        if assignee.department != update_data.assigned_team:
+            raise HTTPException(status_code=400, detail="Assignee does not belong to the assigned team")
+
+        ticket.assignee_id = assignee.id
+    else:
+        ticket.assignee_id = None  # Explicitly clear assignee if not provided
+
+    # Update ticket details
     ticket.priority = update_data.priority
     ticket.assigned_team = update_data.assigned_team
-    ticket.assignee_id = update_data.assignee_id
     ticket.status = TicketStatus.triaged
     ticket.updated_at = datetime.utcnow()
 
@@ -127,10 +141,14 @@ def triage_ticket(
     return ticket
 
 @router.get("/", response_model=List[TicketRead])
-def get_all_tickets(x_user_id: int = Header(..., alias="X-User-ID"), session: Session = Depends(get_session)):
+def get_all_tickets(
+    x_user_id: int = Header(..., alias="X-User-ID"),
+    session: Session = Depends(get_session)
+):
     user = session.get(User, x_user_id)
-    if user is None or user.role not in ["agent", "triage_officer"]:
-        raise HTTPException(status_code=403, detail="Access forbidden")
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
     tickets = session.exec(select(Ticket)).all()
     return tickets
 
@@ -161,34 +179,66 @@ def get_ticket_by_id(
     return ticket
 
 @router.put("/{ticket_id}/assign", response_model=TicketRead)
-def assign_ticket(ticket_id: int, update: TicketAssignUpdate, x_user_id: int = Header(..., alias="X-User-ID"), session: Session = Depends(get_session)):
+def assign_ticket(
+    ticket_id: int,
+    update: TicketAssignUpdate,
+    x_user_id: int = Header(..., alias="X-User-ID"),
+    session: Session = Depends(get_session)
+):
+    # Validate the agent performing the action
     agent = session.get(User, x_user_id)
     if agent is None or agent.role != "agent":
         raise HTTPException(status_code=403, detail="Only agents can assign tickets")
 
+    # Fetch the ticket
     ticket = session.get(Ticket, ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
+    # Check if ticket's assigned team matches agent's department
+    if ticket.assigned_team and agent.department != ticket.assigned_team:
+        raise HTTPException(status_code=403, detail="You cannot assign tickets outside your department")
+
+    # Validate target assignee
+    target_agent = session.get(User, update.assignee_id)
+    if target_agent is None or target_agent.role != "agent":
+        raise HTTPException(status_code=400, detail="Invalid assignee: must be an agent")
+    if target_agent.department != ticket.assigned_team:
+        raise HTTPException(status_code=400, detail="Assignee does not belong to this ticket's team")
+
+    # Perform the assignment
     ticket.assignee_id = update.assignee_id
-    if ticket.status == "triaged":
-        ticket.status = "in_progress"
+    if ticket.status == TicketStatus.triaged:
+        ticket.status = TicketStatus.in_progress
     ticket.updated_at = datetime.utcnow()
+
     session.add(ticket)
     session.commit()
     session.refresh(ticket)
     return ticket
 
 @router.put("/{ticket_id}/resolve", response_model=TicketRead)
-def resolve_ticket(ticket_id: int, update: TicketResolveUpdate, x_user_id: int = Header(..., alias="X-User-ID"), session: Session = Depends(get_session)):
+def resolve_ticket(
+    ticket_id: int,
+    update: TicketResolveUpdate,
+    x_user_id: int = Header(..., alias="X-User-ID"),
+    session: Session = Depends(get_session)
+):
+    # Check if the user is an agent
     agent = session.get(User, x_user_id)
     if agent is None or agent.role != "agent":
         raise HTTPException(status_code=403, detail="Only agents can resolve tickets")
 
+    # Check if the ticket exists
     ticket = session.get(Ticket, ticket_id)
-    if ticket is None or ticket.status != "in_progress":
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    # Check if the ticket is in progress
+    if ticket.status != "in_progress":
         raise HTTPException(status_code=400, detail="Ticket must be in progress to resolve")
 
+    # Update ticket status and notes
     ticket.status = "resolved"
     ticket.resolution_notes = update.resolution_notes
     ticket.resolved_at = datetime.utcnow()
@@ -197,4 +247,5 @@ def resolve_ticket(ticket_id: int, update: TicketResolveUpdate, x_user_id: int =
     session.add(ticket)
     session.commit()
     session.refresh(ticket)
+
     return ticket
