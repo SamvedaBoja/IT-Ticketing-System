@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: ticketing_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: ticketing
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_pass
+    ports:
+      - "3307:3306" # Use 3307 locally to avoid conflict with your system MySQL
+    volumes:
+      - db_data:/var/lib/mysql
+
+  api:
+    build: .
+    container_name: ticketing_api
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: mysql+pymysql://app_user:app_pass@db:3306/ticketing
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  db_data:
