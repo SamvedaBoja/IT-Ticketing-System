@@ -13,10 +13,10 @@ This project is a backend API for managing IT support tickets within an organiza
 - **Triage Officer** – reviews new tickets, sets priority, and assigns to teams/agents
 
 Built with:
-- FastAPI + SQLModel
-- MySQL (local setup)
+- **FastAPI + SQLModel**
+- **MySQL** (via Docker)
 - Modular route structure
-- Swagger UI for easy testing
+- **Swagger UI** for testing
 
 ---
 
@@ -33,10 +33,17 @@ ticketing-api/
 │   ├── routes/
 │   │   ├── ticket_routes.py
 │   │   └── user_routes.py
-│   └── __init__.py
+│   └── init.py
+├── tests/
+│   ├── conftest.py
+│   ├── test_users.py
+│   └── test_tickets.py
 ├── main.py
 ├── .env
+├── .env.test
 ├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
 └── README.md
 ```
 
@@ -66,20 +73,14 @@ pip install -r requirements.txt
 Create a `.env` file in the root:
 
 ```env
-DATABASE_URL=mysql+mysqlconnector://root:<your-password>@localhost:3306/<your-database-name>
+DATABASE_URL=mysql+mysqlconnector://root:<your-password>@localhost:3306/ticketing_system
 ```
-
-> Make sure your MySQL database is created beforehand.
 
 ### 5. Initialize Tables
 Ensure your database is empty, then auto-generate tables:
 
-```python
-# Option 1: Add this once in your main.py and run the app
-from app.database.config import create_db_and_tables
-create_db_and_tables()
-
-# Option 2: Call it once from a Python script or terminal
+```
+Run the app once so create_db_and_tables() initializes tables.
 ```
 
 ### 6. Run the FastAPI App
@@ -87,8 +88,22 @@ create_db_and_tables()
 uvicorn main:app --reload
 ```
 
+### Running with Docker (Recommended)
+```
+docker-compose up --build
+```
 Visit: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for Swagger UI.
 
+### Stopping
+```
+docker-compose down
+```
+### Testing 
+Tests are inside the tests/ folder and use pytest.
+We use a dedicated test database (ticketing_test) and rollback after each test.
+```
+pytest
+```
 ---
 
 ## Role-Based Access Logic
@@ -103,7 +118,7 @@ Visit: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for Swagger UI.
 
 ---
 
-## API Endpoints (V1)
+## API Endpoints 
 
 ### User Management
 - `POST /users` – Create a user  
@@ -129,10 +144,11 @@ Visit: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for Swagger UI.
 ---
 
 ## Features
-
+- Role-based access (Employee, Agent, Triage Officer)
 - Clean RESTful routes with separation of concerns
 - SQLModel-based ORM models with built-in validation
 - Datetime fields for created, updated, resolved timestamps
 - Easy-to-use Swagger UI for testing
-
+- Fully containerized with Docker
+- Pytest-based test suite with MySQL test DB
 ---
